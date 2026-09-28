@@ -1,80 +1,54 @@
+use ndarray::{Array, Dim};
 use rand::RngExt;
 
-#[derive(Debug)]
-pub struct Neuron {
-    pub weights: Vec<f32>,
-    pub bias: Bias,
-    pub learning_rate: f32,
-}
+pub mod perceptron;
 
 #[derive(Debug)]
-pub struct Bias {
-    pub value: f32,
-    pub weight: f32,
+pub struct NeuralNetwork {
+    // TODO: generalize layers
+    /// Weights between input layer and hidden layer
+    weights_ih: Array<f32, Dim<[usize; 2]>>,
+
+    /// Weights between hidden layer and output layer
+    weights_ho: Array<f32, Dim<[usize; 2]>>,
 }
 
-impl Neuron {
-    /// Creates a neuron with random weights for every input
-    pub fn new(input_num: usize, learning_rate: f32) -> Self {
+impl NeuralNetwork {
+    pub fn new(input: usize, hidden_layer: usize, output: usize) -> Self {
         let mut rng = rand::rng();
-
-        Self {
-            weights: (0..input_num).map(|_| rng.random_range(-1. ..1.)).collect(),
-            bias: Bias {
-                value: 1.,
-                weight: rng.random_range(-1. ..1.),
-            },
-            learning_rate,
+        NeuralNetwork {
+            // Initialize random weights
+            weights_ih: Array::from_shape_simple_fn((hidden_layer, input), || rng.random::<f32>()),
+            weights_ho: Array::from_shape_simple_fn((output, hidden_layer), || rng.random::<f32>()),
         }
     }
 
-    /// Generates the output of the neuron by summing every input scaled by its weight
-    pub fn feed_forward(&self, input: &[f32]) -> Result<f32, String> {
-        if input.len() != self.weights.len() {
-            return Err(format!(
-                "Wrong input size, expected {} got {}",
-                self.weights.len(),
-                input.len()
-            ));
-        }
+    pub fn feed_forward(&self, input: &[f32]) -> Vec<f32> {
+        let input_array = match Array::from_shape_vec((input.len(), 1), input.to_vec()) {
+            Ok(array) => array,
+            Err(e) => panic!("Failed to convert slice to array: {e}"),
+        };
 
-        let output = input
-            .iter()
-            .enumerate()
-            .map(|(idx, input)| input * self.weights[idx])
-            .sum::<f32>()
-            + self.bias.value * self.bias.weight;
+        // Feed input to the hidden layer (weighted sum)
+        let hidden_out = self.weights_ih.dot(&input_array);
 
-        Ok(Neuron::activate(output))
+        // Feed hidden layer's output to the output layer (weighted sum)
+        let (output_out, _) = self
+            .weights_ho
+            .dot(&hidden_out)
+            .map(NeuralNetwork::activate) // Apply activation function
+            .into_raw_vec_and_offset();
+
+        output_out
     }
 
-    fn activate(output: f32) -> f32 {
-        output.signum()
+    // TODO: make the activation function as a parameter
+    /// Sigmoid activation function
+    fn activate(x: &f32) -> f32 {
+        1. / (1. + f32::exp(-x))
     }
 
-    /// Trains the neuron by calculating the error as:
-    /// ```
-    /// error = desired output - guess output
-    /// ```
-    ///
-    /// The error is used to move the weights towards a better value:
-    /// ```
-    /// new_weight = weight + dw = weights + (error * input)
-    /// ```
-    ///
-    /// A learning rate reduces or increases the rate of change of the weights
-    /// ```
-    /// new_weight = weight + (error * input) * learning_rate
-    /// ```
-    pub fn train(&mut self, input: &[f32], expected: f32) -> Result<(), String> {
-        let guessed = self.feed_forward(input)?;
-        let error = expected - guessed;
-
-        for (i, weight) in self.weights.iter_mut().enumerate() {
-            *weight += error * input[i] * self.learning_rate
-        }
-        self.bias.weight += error * self.bias.value * self.learning_rate;
-
-        Ok(())
+    pub fn train(&mut self, _input: &[f32], _expected: &[f32]) {
+        todo!()
     }
 }
