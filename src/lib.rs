@@ -106,16 +106,23 @@ impl NeuralNetwork {
             NeuralNetwork::feed_layer(&hidden_out, &self.weights_ho, Some(&self.bias_o));
 
         // Calculate error and backpropagate
+        // δe/δo
+        // How much the error is sensitive to changes in output
         let output_err = expected_array - &output_out;
         let hidden_err = &self.weights_ho.t().dot(&output_err);
 
         // Gradient descent
+        // δe/δo * δo/δi
+        // Multiply the derivative of the error with the derivative of the output
         let output_gradient = output_err * output_out.map(NeuralNetwork::activation_derivative);
         let hidden_gradient = hidden_err * hidden_out.map(NeuralNetwork::activation_derivative);
 
+        // Sensitivity of the error to changes in weights
+        // δe/δw = δi/δw * δo/δi * δe/δo
         self.weights_ho += &(self.options.learning_rate * output_gradient.dot(&hidden_out.t()));
         self.weights_ih += &(self.options.learning_rate * hidden_gradient.dot(&input_array.t()));
 
+        // The derivative of the bias over the weights is 1 so just multiply by the gradient
         self.bias_o += &(self.options.learning_rate * output_gradient);
         self.bias_h += &(self.options.learning_rate * hidden_gradient);
     }
