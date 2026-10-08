@@ -1,8 +1,6 @@
 use ndarray::{Array, Array2};
 use rand::RngExt;
 
-pub mod perceptron;
-
 #[derive(Debug, Clone)]
 pub struct NeuralNetwork {
     // TODO: generalize layers
@@ -18,23 +16,27 @@ pub struct NeuralNetwork {
     /// Output layer biases
     bias_o: Array2<f32>,
 
-    options: NetworkOptions,
+    options: NeuralNetworkOptions,
 }
 
 #[derive(Debug, Clone)]
-pub struct NetworkOptions {
+pub struct NeuralNetworkOptions {
     learning_rate: f32,
 }
 
-impl Default for NetworkOptions {
+impl Default for NeuralNetworkOptions {
     fn default() -> Self {
         Self { learning_rate: 0.3 }
     }
 }
 
 impl NeuralNetwork {
-    // TODO: add biases
-    pub fn new(input: usize, hidden_layer: usize, output: usize, options: NetworkOptions) -> Self {
+    pub fn new(
+        input: usize,
+        hidden_layer: usize,
+        output: usize,
+        options: NeuralNetworkOptions,
+    ) -> Self {
         let mut rng = rand::rng();
         NeuralNetwork {
             // TODO: maybe tweak weight generation
@@ -52,6 +54,14 @@ impl NeuralNetwork {
 
             options,
         }
+    }
+
+    pub fn shape(&self) -> Vec<usize> {
+        vec![
+            self.weights_ih.dim().1, // Number of input neurons
+            self.weights_ih.dim().0, // Number of hidden neurons
+            self.weights_ho.dim().0, // Number of output neurons
+        ]
     }
 
     /// Calculates the output of a layer given an input
@@ -125,5 +135,16 @@ impl NeuralNetwork {
         // The derivative of the bias over the weights is 1 so just multiply by the gradient
         self.bias_o += &(self.options.learning_rate * output_gradient);
         self.bias_h += &(self.options.learning_rate * hidden_gradient);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_shape() {
+        let nn = NeuralNetwork::new(2, 3, 1, NeuralNetworkOptions::default());
+        assert_eq!(nn.shape(), vec![2, 3, 1]);
     }
 }

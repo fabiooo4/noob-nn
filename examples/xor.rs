@@ -1,7 +1,7 @@
 use std::io;
 use std::io::Write;
 
-use noob_nn::{NetworkOptions, NeuralNetwork};
+use noob_nn::{NeuralNetworkOptions, NeuralNetwork};
 use rand::random_range;
 
 const EPOCHS: usize = 10000;
@@ -10,7 +10,7 @@ fn main() {
     // Clear the screen
     print!("\x1b[2J\x1b[H");
 
-    let mut predictor = NeuralNetwork::new(2, 3, 1, NetworkOptions::default());
+    let mut predictor = NeuralNetwork::new(2, 3, 1, NeuralNetworkOptions::default());
     let old_predictor = predictor.clone();
 
     // Training
