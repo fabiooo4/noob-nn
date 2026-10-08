@@ -64,6 +64,29 @@ impl NeuralNetwork {
         ]
     }
 
+    /// Returns the weight matrix between two layers
+    pub fn weights(&self, from: usize, to: usize) -> Vec<Vec<f32>> {
+        match (from, to) {
+            (0, 1) => self
+                .weights_ih
+                .clone()
+                .into_raw_vec_and_offset()
+                .0
+                .chunks(self.weights_ih.dim().1)
+                .map(|row| row.to_vec())
+                .collect(),
+            (1, 2) => self
+                .weights_ho
+                .clone()
+                .into_raw_vec_and_offset()
+                .0
+                .chunks(self.weights_ho.dim().1)
+                .map(|row| row.to_vec())
+                .collect(),
+            _ => panic!("Invalid layer indices"),
+        }
+    }
+
     /// Calculates the output of a layer given an input
     fn feed_layer(
         input: &Array2<f32>,
@@ -146,5 +169,34 @@ mod test {
     fn test_shape() {
         let nn = NeuralNetwork::new(2, 3, 1, NeuralNetworkOptions::default());
         assert_eq!(nn.shape(), vec![2, 3, 1]);
+    }
+
+    #[test]
+    fn test_weights() {
+        let nn = NeuralNetwork::new(2, 3, 1, NeuralNetworkOptions::default());
+        let weights_ih = nn.weights(0, 1);
+        let weights_ho = nn.weights(1, 2);
+
+        assert_eq!(
+            weights_ih,
+            nn.weights_ih
+                .clone()
+                .into_raw_vec_and_offset()
+                .0
+                .chunks(nn.weights_ih.dim().1)
+                .map(|row| row.to_vec())
+                .collect::<Vec<Vec<f32>>>()
+        );
+
+        assert_eq!(
+            weights_ho,
+            nn.weights_ho
+                .clone()
+                .into_raw_vec_and_offset()
+                .0
+                .chunks(nn.weights_ho.dim().1)
+                .map(|row| row.to_vec())
+                .collect::<Vec<Vec<f32>>>()
+        );
     }
 }
