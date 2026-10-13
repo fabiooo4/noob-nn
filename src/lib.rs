@@ -1,8 +1,8 @@
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, fs, path::Path};
 
-use ndarray::{Array, Array2, ErrorKind};
+use ndarray::{Array, Array2};
 use rand::RngExt;
-use safetensors::tensor::TensorView;
+use safetensors::{Dtype, SafeTensors, tensor::TensorView};
 
 #[derive(Debug, Clone)]
 pub struct NeuralNetwork {
@@ -164,19 +164,57 @@ impl NeuralNetwork {
     }
 
     /// Saves the neural network to a file in safetensors format
-    pub fn save(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let tensors = vec![(
-            "weights_ih",
-            TensorView::new(
-                safetensors::Dtype::F32,
-                self.weights_ih.shape().to_vec(),
-                bytemuck::cast_slice(
-                    self.weights_ih
-                        .as_slice()
-                        .ok_or("Failed to convert weights_ih to slice")?,
-                ),
-            )?,
-        )];
+    pub fn save_to_file(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let tensors = vec![
+            (
+                "weights_ih",
+                TensorView::new(
+                    Dtype::F32,
+                    self.weights_ih.shape().to_vec(),
+                    bytemuck::cast_slice(
+                        self.weights_ih
+                            .as_slice()
+                            .ok_or("Failed to convert weights_ih to slice")?,
+                    ),
+                )?,
+            ),
+            (
+                "bias_h",
+                TensorView::new(
+                    Dtype::F32,
+                    self.bias_h.shape().to_vec(),
+                    bytemuck::cast_slice(
+                        self.bias_h
+                            .as_slice()
+                            .ok_or("Failed to convert bias_h to slice")?,
+                    ),
+                )?,
+            ),
+            (
+                "weights_ho",
+                TensorView::new(
+                    Dtype::F32,
+                    self.weights_ho.shape().to_vec(),
+                    bytemuck::cast_slice(
+                        self.weights_ho
+                            .as_slice()
+                            .ok_or("Failed to convert weights_ho to slice")?,
+                    ),
+                )?,
+            ),
+            (
+                "bias_o",
+                TensorView::new(
+                    Dtype::F32,
+                    self.bias_o.shape().to_vec(),
+                    bytemuck::cast_slice(
+                        self.bias_o
+                            .as_slice()
+                            .ok_or("Failed to convert bias_o to slice")?,
+                    ),
+                )?,
+            ),
+        ];
 
         let mut metadata = HashMap::new();
         metadata.insert(
@@ -187,6 +225,59 @@ impl NeuralNetwork {
         safetensors::serialize_to_file(tensors, Some(metadata), Path::new(path))?;
 
         Ok(())
+    }
+
+    /// Loads a neural network from a file in safetensors format
+    pub fn from_file(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let buffer = fs::read(path)?;
+
+        let tensors = SafeTensors::deserialize(&buffer)?;
+
+        let weights_ih = Self::tensor_view_to_array2(&tensors.tensor("weights_ih")?)?;
+        let bias_h = Self::tensor_view_to_array2(&tensors.tensor("bias_h")?)?;
+        let weights_ho = Self::tensor_view_to_array2(&tensors.tensor("weights_ho")?)?;
+        let bias_o = Self::tensor_view_to_array2(&tensors.tensor("bias_o")?)?;
+
+        if weights_ih.dim().0 != bias_h.dim().0 {
+            return Err("Mismatched dimensions between weights_ih and bias_h".into());
+        }
+        if weights_ho.dim().0 != bias_o.dim().0 {
+            return Err("Mismatched dimensions between weights_ho and bias_o".into());
+        }
+        if weights_ih.dim().0 != weights_ho.dim().1 {
+            return Err("Hidden layer size mismatch between input-hidden and hidden-output".into());
+        }
+
+        Ok(NeuralNetwork {
+            weights_ih,
+            bias_h,
+            weights_ho,
+            bias_o,
+            options: NeuralNetworkOptions::default(),
+        })
+    }
+
+    /// Converts a SafeTensors TensorView into an owned 2D ndarray
+    fn tensor_view_to_array2(view: &TensorView) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
+        if view.dtype() != Dtype::F32 {
+            return Err(format!("Expected F32 dtype, found {:?}", view.dtype()).into());
+        }
+
+        let shape = view.shape();
+        if shape.len() != 2 {
+            return Err(format!(
+                "Expected 2D matrix, but tensor has {} dimensions",
+                shape.len()
+            )
+            .into());
+        }
+
+        // Zero-copy cast &[u8] into &[f32]
+        let data_f32: &[f32] = bytemuck::cast_slice(view.data());
+
+        // Reconstruct ndarray (copies the slice into an owned buffer)
+        let array = Array2::from_shape_vec((shape[0], shape[1]), data_f32.to_vec())?;
+        Ok(array)
     }
 }
 
