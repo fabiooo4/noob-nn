@@ -1,5 +1,8 @@
+use std::{collections::HashMap, path::Path};
+
 use ndarray::{Array, Array2, ErrorKind};
 use rand::RngExt;
+use safetensors::tensor::TensorView;
 
 #[derive(Debug, Clone)]
 pub struct NeuralNetwork {
@@ -67,7 +70,7 @@ impl NeuralNetwork {
     /// Returns the weight matrix between two layers
     pub fn weights(&self, layer: usize) -> Result<Vec<Vec<f32>>, String> {
         match layer {
-            1 => Ok(self
+            0 => Ok(self
                 .weights_ih
                 .clone()
                 .into_raw_vec_and_offset()
@@ -75,7 +78,7 @@ impl NeuralNetwork {
                 .chunks(self.weights_ih.dim().1)
                 .map(|row| row.to_vec())
                 .collect()),
-            2 => Ok(self
+            1 => Ok(self
                 .weights_ho
                 .clone()
                 .into_raw_vec_and_offset()
@@ -158,6 +161,32 @@ impl NeuralNetwork {
         // The derivative of the bias over the weights is 1 so just multiply by the gradient
         self.bias_o += &(self.options.learning_rate * output_gradient);
         self.bias_h += &(self.options.learning_rate * hidden_gradient);
+    }
+
+    /// Saves the neural network to a file in safetensors format
+    pub fn save(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let tensors = vec![(
+            "weights_ih",
+            TensorView::new(
+                safetensors::Dtype::F32,
+                self.weights_ih.shape().to_vec(),
+                bytemuck::cast_slice(
+                    self.weights_ih
+                        .as_slice()
+                        .ok_or("Failed to convert weights_ih to slice")?,
+                ),
+            )?,
+        )];
+
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "learning_rate".to_string(),
+            self.options.learning_rate.to_string(),
+        );
+
+        safetensors::serialize_to_file(tensors, Some(metadata), Path::new(path))?;
+
+        Ok(())
     }
 }
 
