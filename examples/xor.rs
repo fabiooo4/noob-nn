@@ -1,8 +1,8 @@
 use std::io;
 use std::io::Write;
 
-use noob_nn::{NeuralNetworkOptions, NeuralNetwork};
-use rand::random_range;
+use noob_nn::{NeuralNetwork, NeuralNetworkOptions};
+use rand::seq::SliceRandom;
 
 const EPOCHS: usize = 10000;
 
@@ -10,21 +10,22 @@ fn main() {
     // Clear the screen
     print!("\x1b[2J\x1b[H");
 
-    let mut predictor = NeuralNetwork::new(2, 3, 1, NeuralNetworkOptions::default());
+    let mut predictor = NeuralNetwork::new(2, &[3], 1, NeuralNetworkOptions::default());
     let old_predictor = predictor.clone();
 
     // Training
-    let data = xor_truthtable();
+    let mut data = xor_truthtable();
+    data.shuffle(&mut rand::rng());
     for epoch in 0..=EPOCHS {
-        let (input, expected) = data[random_range(0..data.len())];
+        for (idx, (input, expected)) in data.iter().enumerate() {
+            predictor.train(input, &[*expected]);
 
-        predictor.train(&input, &[expected]);
-
-        draw_xor(&predictor, 20);
-        println!(
-            "Training epoch: {epoch}/{EPOCHS} {:.0}%",
-            (epoch as f32 / EPOCHS as f32) * 100.
-        )
+            draw_xor(&predictor, 20);
+            println!(
+                "Training epoch: {epoch}/{EPOCHS} {:.0}%",
+                (idx as f32 / data.len() as f32) * 100.
+            )
+        }
     }
 
     println!("\nBefore training:\n{old_predictor:#?}");

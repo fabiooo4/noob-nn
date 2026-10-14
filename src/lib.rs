@@ -1,24 +1,14 @@
-use std::{collections::HashMap, fs, path::Path};
+mod layer;
+
+use crate::layer::Layer;
 
 use ndarray::{Array, Array2};
-use rand::RngExt;
 use safetensors::{Dtype, SafeTensors, tensor::TensorView};
+use std::{collections::HashMap, fs, path::Path};
 
 #[derive(Debug, Clone)]
 pub struct NeuralNetwork {
-    // TODO: generalize layers
-    /// Weights between input layer and hidden layer
-    weights_ih: Array2<f32>,
-
-    /// Hidden layer biases
-    bias_h: Array2<f32>,
-
-    /// Weights between hidden layer and output layer
-    weights_ho: Array2<f32>,
-
-    /// Output layer biases
-    bias_o: Array2<f32>,
-
+    layers: Vec<Layer>,
     options: NeuralNetworkOptions,
 }
 
@@ -33,91 +23,84 @@ impl Default for NeuralNetworkOptions {
     }
 }
 
+impl From<NeuralNetworkOptions> for HashMap<String, String> {
+    fn from(options: NeuralNetworkOptions) -> Self {
+        let mut map = HashMap::new();
+        map.insert(
+            "learning_rate".to_string(),
+            options.learning_rate.to_string(),
+        );
+        map
+    }
+}
+
+impl From<&HashMap<String, String>> for NeuralNetworkOptions {
+    fn from(map: &HashMap<String, String>) -> Self {
+        let learning_rate = map
+            .get("learning_rate")
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(0.3);
+
+        Self { learning_rate }
+    }
+}
+
 impl NeuralNetwork {
     pub fn new(
         input: usize,
-        hidden_layer: usize,
+        hidden_layers: &[usize],
         output: usize,
         options: NeuralNetworkOptions,
     ) -> Self {
-        let mut rng = rand::rng();
-        NeuralNetwork {
-            // TODO: maybe tweak weight generation
-            // Initialize random weights
-            weights_ih: Array::from_shape_simple_fn((hidden_layer, input), || {
-                rng.random_range(-1.0..1.0)
-            }),
-            weights_ho: Array::from_shape_simple_fn((output, hidden_layer), || {
-                rng.random_range(-1.0..1.0)
-            }),
+        let sizes: Vec<usize> = [vec![input], hidden_layers.to_vec(), vec![output]]
+            .iter()
+            .flatten()
+            .cloned()
+            .collect();
 
-            // Initialize random biases
-            bias_h: Array::from_shape_simple_fn((hidden_layer, 1), || rng.random_range(-1.0..1.0)),
-            bias_o: Array::from_shape_simple_fn((output, 1), || rng.random_range(-1.0..1.0)),
-
-            options,
+        let mut layers = vec![];
+        for size in sizes.windows(2) {
+            layers.push(Layer::new(size[0], size[1]));
         }
+
+        NeuralNetwork { layers, options }
     }
 
+    /// Returns the number of neurons for each layer.
+    /// The input counts as a layer, so the first element is the number of inputs and the last is
+    /// the number of outputs.
     pub fn shape(&self) -> Vec<usize> {
-        vec![
-            self.weights_ih.dim().1, // Number of input neurons
-            self.weights_ih.dim().0, // Number of hidden neurons
-            self.weights_ho.dim().0, // Number of output neurons
-        ]
+        let mut sizes = Vec::with_capacity(self.layers.len() + 1);
+        let inputs = match self.layers.first() {
+            Some(layer) => layer.weights.dim().1,
+            None => 0,
+        };
+        sizes.push(inputs);
+
+        for l in self.layers.iter() {
+            sizes.push(l.weights.dim().0)
+        }
+
+        sizes
     }
 
     /// Returns the weight matrix between two layers
-    pub fn weights(&self, layer: usize) -> Result<Vec<Vec<f32>>, String> {
-        match layer {
-            0 => Ok(self
-                .weights_ih
-                .clone()
-                .into_raw_vec_and_offset()
-                .0
-                .chunks(self.weights_ih.dim().1)
-                .map(|row| row.to_vec())
-                .collect()),
-            1 => Ok(self
-                .weights_ho
-                .clone()
-                .into_raw_vec_and_offset()
-                .0
-                .chunks(self.weights_ho.dim().1)
-                .map(|row| row.to_vec())
-                .collect()),
-            _ => Err(String::from("Invalid layer indices")),
-        }
-    }
-
-    /// Calculates the output of a layer given an input
-    fn feed_layer(
-        input: &Array2<f32>,
-        weight: &Array2<f32>,
-        bias: Option<&Array2<f32>>,
-    ) -> Array2<f32> {
-        let bias = match bias {
-            Some(b) => b,
-            None => &Array::zeros((1, 1)),
-        };
-
-        let weighted_sum = weight.dot(input) + bias;
-        weighted_sum.map(NeuralNetwork::activation)
+    /// Returns `None` if the layer index is out of bounds
+    pub fn weights(&self, layer: usize) -> Option<Vec<Vec<f32>>> {
+        Some(self.layers.get(layer)?.to_vec())
     }
 
     pub fn feed_forward(&self, input: &[f32]) -> Vec<f32> {
-        let input_array = Array::from_shape_vec((input.len(), 1), input.to_vec()).unwrap(/* An array can always be converted to a one dimensional matrix */);
+        let input_array = Array::from_shape_vec((input.len(), 1), input.to_vec())
+            .expect("An array can always be converted to a one dimensional matrix");
 
-        // Feed input to the hidden layer
-        let hidden_out =
-            NeuralNetwork::feed_layer(&input_array, &self.weights_ih, Some(&self.bias_h));
+        // Feed forward every layer
+        let mut output = input_array;
+        for layer in &self.layers {
+            output = layer.feed_layer(&output, Self::activation)
+        }
 
-        // Feed hidden layer's output to the output layer
-        let (output_out, _) =
-            NeuralNetwork::feed_layer(&hidden_out, &self.weights_ho, Some(&self.bias_o))
-                .into_raw_vec_and_offset();
-
-        output_out
+        output.into_raw_vec_and_offset().0
     }
 
     // TODO: make the activation function and derivative as options
@@ -133,95 +116,95 @@ impl NeuralNetwork {
     }
 
     pub fn train(&mut self, input: &[f32], expected: &[f32]) {
-        let input_array = Array::from_shape_vec((input.len(), 1), input.to_vec()).unwrap(/* An array can always be converted to a one dimensional matrix */);
-        let expected_array = Array::from_shape_vec((expected.len(), 1), expected.to_vec()).unwrap(/* An array can always be converted to a one dimensional matrix */);
+        let input_array = Array::from_shape_vec((input.len(), 1), input.to_vec())
+            .expect("An array can always be converted to a one dimensional matrix");
+        let expected_array = Array::from_shape_vec((expected.len(), 1), expected.to_vec())
+            .expect("An array can always be converted to a one dimensional matrix");
 
-        let hidden_out =
-            NeuralNetwork::feed_layer(&input_array, &self.weights_ih, Some(&self.bias_h));
-        let output_out =
-            NeuralNetwork::feed_layer(&hidden_out, &self.weights_ho, Some(&self.bias_o));
+        let mut outputs = Vec::with_capacity(self.layers.len() + 1);
+        outputs.push(input_array);
 
-        // Calculate error and backpropagate
-        // δe/δo
-        // How much the error is sensitive to changes in output
-        let output_err = expected_array - &output_out;
-        let hidden_err = &self.weights_ho.t().dot(&output_err);
+        // Feed forward and save each layer output
+        for layer in &self.layers {
+            let prev_out = outputs
+                .last()
+                .expect("There is always at least a layer with an output");
+            outputs.push(layer.feed_layer(prev_out, Self::activation));
+        }
 
-        // Gradient descent
-        // δe/δo * δo/δi
-        // Multiply the derivative of the error with the derivative of the output
-        let output_gradient = output_err * output_out.map(NeuralNetwork::activation_derivative);
-        let hidden_gradient = hidden_err * hidden_out.map(NeuralNetwork::activation_derivative);
+        let mut errors = Vec::with_capacity(self.layers.len() + 1);
 
-        // Sensitivity of the error to changes in weights
-        // δe/δw = δi/δw * δo/δi * δe/δo
-        self.weights_ho += &(self.options.learning_rate * output_gradient.dot(&hidden_out.t()));
-        self.weights_ih += &(self.options.learning_rate * hidden_gradient.dot(&input_array.t()));
+        // Calculate the network output error to propagate backwards
+        errors.push(
+            expected_array
+                - outputs
+                    .last()
+                    .expect("There is always at least a layer with an output"),
+        );
 
-        // The derivative of the bias over the weights is 1 so just multiply by the gradient
-        self.bias_o += &(self.options.learning_rate * output_gradient);
-        self.bias_h += &(self.options.learning_rate * hidden_gradient);
+        // Backpropagation
+        for (i, layer) in self.layers.iter_mut().enumerate().rev() {
+            let layer_input = &outputs[i];
+            let layer_output = &outputs[i + 1];
+
+            let prev_err = errors
+                .last()
+                .expect("There is always at least a layer with an output");
+
+            // Gradient descent
+            // δe/δo * δo/δi
+            // Multiply the derivative of the error with the derivative of the output
+            let gradient = prev_err * layer_output.map(Self::activation_derivative);
+
+            // Calculate the error for the previous layer
+            // δe/δo
+            // How much the error is sensitive to changes in output
+            let err = layer.weights.t().dot(prev_err);
+            errors.push(err);
+
+            // Update weights
+            // Sensitivity of the error to changes in weights
+            // δe/δw = δi/δw * δo/δi * δe/δo
+            layer.weights += &(self.options.learning_rate * gradient.dot(&layer_input.t()));
+
+            // The derivative of the bias over the weights is 1 so just multiply by the gradient
+            layer.biases += &(self.options.learning_rate * &gradient);
+        }
     }
 
     /// Saves the neural network to a file in safetensors format
     pub fn save_to_file(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let tensors = vec![
-            (
-                "weights_ih",
+        let mut tensors = Vec::with_capacity(self.layers.len() * 2); // Each layer has also a bias
+        for (idx, layer) in self.layers.iter().enumerate() {
+            tensors.push((
+                format!("layer_{idx}_weights"),
                 TensorView::new(
                     Dtype::F32,
-                    self.weights_ih.shape().to_vec(),
+                    layer.weights.shape().to_vec(),
                     bytemuck::cast_slice(
-                        self.weights_ih
+                        layer
+                            .weights
                             .as_slice()
-                            .ok_or("Failed to convert weights_ih to slice")?,
+                            .ok_or(format!("Failed to convert 'layer_{idx}_weights' to slice"))?,
                     ),
                 )?,
-            ),
-            (
-                "bias_h",
+            ));
+            tensors.push((
+                format!("layer_{idx}_biases"),
                 TensorView::new(
                     Dtype::F32,
-                    self.bias_h.shape().to_vec(),
+                    layer.biases.shape().to_vec(),
                     bytemuck::cast_slice(
-                        self.bias_h
+                        layer
+                            .biases
                             .as_slice()
-                            .ok_or("Failed to convert bias_h to slice")?,
+                            .ok_or(format!("Failed to convert 'layer_{idx}_biases' to slice"))?,
                     ),
                 )?,
-            ),
-            (
-                "weights_ho",
-                TensorView::new(
-                    Dtype::F32,
-                    self.weights_ho.shape().to_vec(),
-                    bytemuck::cast_slice(
-                        self.weights_ho
-                            .as_slice()
-                            .ok_or("Failed to convert weights_ho to slice")?,
-                    ),
-                )?,
-            ),
-            (
-                "bias_o",
-                TensorView::new(
-                    Dtype::F32,
-                    self.bias_o.shape().to_vec(),
-                    bytemuck::cast_slice(
-                        self.bias_o
-                            .as_slice()
-                            .ok_or("Failed to convert bias_o to slice")?,
-                    ),
-                )?,
-            ),
-        ];
+            ));
+        }
 
-        let mut metadata = HashMap::new();
-        metadata.insert(
-            "learning_rate".to_string(),
-            self.options.learning_rate.to_string(),
-        );
-
+        let metadata: HashMap<String, String> = self.options.clone().into();
         safetensors::serialize_to_file(tensors, Some(metadata), Path::new(path))?;
 
         Ok(())
@@ -233,28 +216,26 @@ impl NeuralNetwork {
 
         let tensors = SafeTensors::deserialize(&buffer)?;
 
-        let weights_ih = Self::tensor_view_to_array2(&tensors.tensor("weights_ih")?)?;
-        let bias_h = Self::tensor_view_to_array2(&tensors.tensor("bias_h")?)?;
-        let weights_ho = Self::tensor_view_to_array2(&tensors.tensor("weights_ho")?)?;
-        let bias_o = Self::tensor_view_to_array2(&tensors.tensor("bias_o")?)?;
+        let mut layers = Vec::new();
+        let mut idx = 0;
+        while let Ok(weights_tensor) = tensors.tensor(&format!("layer_{idx}_weights")) {
+            let biases_tensor = tensors.tensor(&format!("layer_{idx}_biases"))?;
 
-        if weights_ih.dim().0 != bias_h.dim().0 {
-            return Err("Mismatched dimensions between weights_ih and bias_h".into());
-        }
-        if weights_ho.dim().0 != bias_o.dim().0 {
-            return Err("Mismatched dimensions between weights_ho and bias_o".into());
-        }
-        if weights_ih.dim().0 != weights_ho.dim().1 {
-            return Err("Hidden layer size mismatch between input-hidden and hidden-output".into());
+            let weights = Self::tensor_view_to_array2(&weights_tensor)?;
+            let biases = Self::tensor_view_to_array2(&biases_tensor)?;
+
+            layers.push(Layer { weights, biases });
+            idx += 1;
         }
 
-        Ok(NeuralNetwork {
-            weights_ih,
-            bias_h,
-            weights_ho,
-            bias_o,
-            options: NeuralNetworkOptions::default(),
-        })
+        let metadata = SafeTensors::read_metadata(&buffer)?.1;
+        let options = metadata
+            .metadata()
+            .as_ref()
+            .ok_or("No metadata found")?
+            .into();
+
+        Ok(NeuralNetwork { layers, options })
     }
 
     /// Converts a SafeTensors TensorView into an owned 2D ndarray
@@ -287,38 +268,42 @@ mod test {
 
     #[test]
     fn test_shape() {
-        let nn = NeuralNetwork::new(2, 3, 1, NeuralNetworkOptions::default());
+        let nn = NeuralNetwork::new(2, &[3], 1, NeuralNetworkOptions::default());
         assert_eq!(nn.shape(), vec![2, 3, 1]);
     }
 
     #[test]
     fn test_weights() {
-        let nn = NeuralNetwork::new(2, 3, 1, NeuralNetworkOptions::default());
-        let weights_ih = nn.weights(1);
-        let weights_ho = nn.weights(2);
+        let nn = NeuralNetwork::new(2, &[3], 1, NeuralNetworkOptions::default());
+        let weights_ih = nn.weights(0);
+        let weights_ho = nn.weights(1);
 
         assert_eq!(
             weights_ih,
-            Ok(nn
-                .weights_ih
-                .clone()
-                .into_raw_vec_and_offset()
-                .0
-                .chunks(nn.weights_ih.dim().1)
-                .map(|row| row.to_vec())
-                .collect::<Vec<Vec<f32>>>())
+            Some(
+                nn.layers[0]
+                    .weights
+                    .clone()
+                    .into_raw_vec_and_offset()
+                    .0
+                    .chunks(nn.layers[0].weights.dim().1)
+                    .map(|row| row.to_vec())
+                    .collect::<Vec<Vec<f32>>>()
+            )
         );
 
         assert_eq!(
             weights_ho,
-            Ok(nn
-                .weights_ho
-                .clone()
-                .into_raw_vec_and_offset()
-                .0
-                .chunks(nn.weights_ho.dim().1)
-                .map(|row| row.to_vec())
-                .collect::<Vec<Vec<f32>>>())
+            Some(
+                nn.layers[1]
+                    .weights
+                    .clone()
+                    .into_raw_vec_and_offset()
+                    .0
+                    .chunks(nn.layers[1].weights.dim().1)
+                    .map(|row| row.to_vec())
+                    .collect::<Vec<Vec<f32>>>()
+            )
         );
     }
 }
