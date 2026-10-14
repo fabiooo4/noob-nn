@@ -216,7 +216,7 @@ impl NeuralNetwork {
 
         let tensors = SafeTensors::deserialize(&buffer)?;
 
-        let mut layers = Vec::new();
+        let mut layers: Vec<Layer> = Vec::new();
         let mut idx = 0;
         while let Ok(weights_tensor) = tensors.tensor(&format!("layer_{idx}_weights")) {
             let biases_tensor = tensors.tensor(&format!("layer_{idx}_biases"))?;
@@ -224,8 +224,29 @@ impl NeuralNetwork {
             let weights = Self::tensor_view_to_array2(&weights_tensor)?;
             let biases = Self::tensor_view_to_array2(&biases_tensor)?;
 
+            if weights.dim().0 != biases.dim().0 || biases.dim().1 != 1 {
+                return Err(format!(
+                    "Mismatched dimensions between weights and biases in layer {idx}"
+                )
+                .into());
+            }
+
+            if let Some(prev_layer) = layers.last() {
+                if prev_layer.weights.dim().0 != weights.dim().1 {
+                    return Err(format!(
+                        "Layer size mismatch between layer {} and layer {idx}",
+                        idx - 1
+                    )
+                    .into());
+                }
+            }
+
             layers.push(Layer { weights, biases });
             idx += 1;
+        }
+
+        if layers.is_empty() {
+            return Err("No layers found in file".into());
         }
 
         let metadata = SafeTensors::read_metadata(&buffer)?.1;
@@ -305,5 +326,101 @@ mod test {
                     .collect::<Vec<Vec<f32>>>()
             )
         );
+    }
+
+    #[test]
+    fn test_save_and_load() {
+        let path = "test_model.safetensors";
+        let nn = NeuralNetwork::new(2, &[3, 4], 1, NeuralNetworkOptions::default());
+        nn.save_to_file(path).expect("Failed to save");
+
+        let loaded = NeuralNetwork::from_file(path).expect("Failed to load");
+        assert_eq!(nn.shape(), loaded.shape());
+        assert_eq!(nn.weights(0), loaded.weights(0));
+        assert_eq!(nn.weights(1), loaded.weights(1));
+        assert_eq!(nn.weights(2), loaded.weights(2));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_from_file_validation_layer_mismatch() {
+        let path = "test_invalid_layers.safetensors";
+        let layer0_w = Array2::<f32>::zeros((3, 2));
+        let layer0_b = Array2::<f32>::zeros((3, 1));
+        let layer1_w = Array2::<f32>::zeros((1, 4)); // Expected (1, 3) to match layer0 output 3
+        let layer1_b = Array2::<f32>::zeros((1, 1));
+
+        let tensors = vec![
+            (
+                "layer_0_weights".to_string(),
+                TensorView::new(Dtype::F32, layer0_w.shape().to_vec(), bytemuck::cast_slice(layer0_w.as_slice().unwrap())).unwrap(),
+            ),
+            (
+                "layer_0_biases".to_string(),
+                TensorView::new(Dtype::F32, layer0_b.shape().to_vec(), bytemuck::cast_slice(layer0_b.as_slice().unwrap())).unwrap(),
+            ),
+            (
+                "layer_1_weights".to_string(),
+                TensorView::new(Dtype::F32, layer1_w.shape().to_vec(), bytemuck::cast_slice(layer1_w.as_slice().unwrap())).unwrap(),
+            ),
+            (
+                "layer_1_biases".to_string(),
+                TensorView::new(Dtype::F32, layer1_b.shape().to_vec(), bytemuck::cast_slice(layer1_b.as_slice().unwrap())).unwrap(),
+            ),
+        ];
+
+        let mut metadata = HashMap::new();
+        metadata.insert("learning_rate".to_string(), "0.3".to_string());
+        safetensors::serialize_to_file(tensors, Some(metadata), Path::new(path)).unwrap();
+
+        let result = NeuralNetwork::from_file(path);
+        let _ = fs::remove_file(path);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Layer size mismatch"));
+    }
+
+    #[test]
+    fn test_from_file_validation_bias_mismatch() {
+        let path = "test_invalid_bias.safetensors";
+        let layer0_w = Array2::<f32>::zeros((3, 2));
+        let layer0_b = Array2::<f32>::zeros((4, 1)); // Expected (3, 1) to match nodes 3
+
+        let tensors = vec![
+            (
+                "layer_0_weights".to_string(),
+                TensorView::new(Dtype::F32, layer0_w.shape().to_vec(), bytemuck::cast_slice(layer0_w.as_slice().unwrap())).unwrap(),
+            ),
+            (
+                "layer_0_biases".to_string(),
+                TensorView::new(Dtype::F32, layer0_b.shape().to_vec(), bytemuck::cast_slice(layer0_b.as_slice().unwrap())).unwrap(),
+            ),
+        ];
+
+        let mut metadata = HashMap::new();
+        metadata.insert("learning_rate".to_string(), "0.3".to_string());
+        safetensors::serialize_to_file(tensors, Some(metadata), Path::new(path)).unwrap();
+
+        let result = NeuralNetwork::from_file(path);
+        let _ = fs::remove_file(path);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Mismatched dimensions between weights and biases"));
+    }
+
+    #[test]
+    fn test_from_file_validation_empty() {
+        let path = "test_empty.safetensors";
+        let tensors: Vec<(String, TensorView)> = vec![];
+        let mut metadata = HashMap::new();
+        metadata.insert("learning_rate".to_string(), "0.3".to_string());
+        safetensors::serialize_to_file(tensors, Some(metadata), Path::new(path)).unwrap();
+
+        let result = NeuralNetwork::from_file(path);
+        let _ = fs::remove_file(path);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No layers found in file"));
     }
 }
