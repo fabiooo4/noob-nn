@@ -14,8 +14,8 @@ pub struct NeuralNetwork {
 
 #[derive(Debug, Clone)]
 pub struct NeuralNetworkOptions {
-    learning_rate: f32,
-    labels: Option<Vec<String>>,
+    pub learning_rate: f32,
+    pub labels: Option<Vec<String>>,
 }
 
 impl Default for NeuralNetworkOptions {
