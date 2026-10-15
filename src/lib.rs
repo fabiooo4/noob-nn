@@ -15,33 +15,52 @@ pub struct NeuralNetwork {
 #[derive(Debug, Clone)]
 pub struct NeuralNetworkOptions {
     learning_rate: f32,
+    labels: Option<Vec<String>>,
 }
 
 impl Default for NeuralNetworkOptions {
     fn default() -> Self {
-        Self { learning_rate: 0.3 }
+        Self {
+            learning_rate: 0.3,
+            labels: None,
+        }
     }
 }
 
+// TODO: Use serde
 impl From<NeuralNetworkOptions> for HashMap<String, String> {
     fn from(options: NeuralNetworkOptions) -> Self {
-        let mut map = HashMap::new();
-        map.insert(
-            "learning_rate".to_string(),
-            options.learning_rate.to_string(),
-        );
-        map
+        HashMap::from([
+            (
+                "learning_rate".to_string(),
+                options.learning_rate.to_string(),
+            ),
+            (
+                "labels".to_string(),
+                options.labels.unwrap_or(vec![]).join(", "),
+            ),
+        ])
     }
 }
 
 impl From<&HashMap<String, String>> for NeuralNetworkOptions {
     fn from(map: &HashMap<String, String>) -> Self {
-        let learning_rate = map
+        let learning_rate: f32 = map
             .get("learning_rate")
             .and_then(|s| s.parse::<f32>().ok())
             .unwrap_or(0.3);
 
-        Self { learning_rate }
+        let labels: Option<Vec<String>> = map.get("labels").and_then(|s| {
+            if s.is_empty() {
+                return None;
+            };
+            Some(s.split(", ").map(|e| e.to_owned()).collect())
+        });
+
+        Self {
+            learning_rate,
+            labels,
+        }
     }
 }
 
@@ -101,6 +120,14 @@ impl NeuralNetwork {
         }
 
         output.into_raw_vec_and_offset().0
+    }
+
+    /// Converts the output of the model into a label
+    pub fn output_to_label(&self, output: &[f32]) -> Option<String> {
+        let max = output.iter().cloned().reduce(f32::max).unwrap_or_default();
+        let argmax = output.iter().position(|&o| o == max)?;
+
+        self.options.labels.clone()?.get(argmax).cloned()
     }
 
     // TODO: make the activation function and derivative as options
@@ -231,14 +258,14 @@ impl NeuralNetwork {
                 .into());
             }
 
-            if let Some(prev_layer) = layers.last() {
-                if prev_layer.weights.dim().0 != weights.dim().1 {
-                    return Err(format!(
-                        "Layer size mismatch between layer {} and layer {idx}",
-                        idx - 1
-                    )
-                    .into());
-                }
+            if let Some(prev_layer) = layers.last()
+                && prev_layer.weights.dim().0 != weights.dim().1
+            {
+                return Err(format!(
+                    "Layer size mismatch between layer {} and layer {idx}",
+                    idx - 1
+                )
+                .into());
             }
 
             layers.push(Layer { weights, biases });
@@ -354,19 +381,39 @@ mod test {
         let tensors = vec![
             (
                 "layer_0_weights".to_string(),
-                TensorView::new(Dtype::F32, layer0_w.shape().to_vec(), bytemuck::cast_slice(layer0_w.as_slice().unwrap())).unwrap(),
+                TensorView::new(
+                    Dtype::F32,
+                    layer0_w.shape().to_vec(),
+                    bytemuck::cast_slice(layer0_w.as_slice().unwrap()),
+                )
+                .unwrap(),
             ),
             (
                 "layer_0_biases".to_string(),
-                TensorView::new(Dtype::F32, layer0_b.shape().to_vec(), bytemuck::cast_slice(layer0_b.as_slice().unwrap())).unwrap(),
+                TensorView::new(
+                    Dtype::F32,
+                    layer0_b.shape().to_vec(),
+                    bytemuck::cast_slice(layer0_b.as_slice().unwrap()),
+                )
+                .unwrap(),
             ),
             (
                 "layer_1_weights".to_string(),
-                TensorView::new(Dtype::F32, layer1_w.shape().to_vec(), bytemuck::cast_slice(layer1_w.as_slice().unwrap())).unwrap(),
+                TensorView::new(
+                    Dtype::F32,
+                    layer1_w.shape().to_vec(),
+                    bytemuck::cast_slice(layer1_w.as_slice().unwrap()),
+                )
+                .unwrap(),
             ),
             (
                 "layer_1_biases".to_string(),
-                TensorView::new(Dtype::F32, layer1_b.shape().to_vec(), bytemuck::cast_slice(layer1_b.as_slice().unwrap())).unwrap(),
+                TensorView::new(
+                    Dtype::F32,
+                    layer1_b.shape().to_vec(),
+                    bytemuck::cast_slice(layer1_b.as_slice().unwrap()),
+                )
+                .unwrap(),
             ),
         ];
 
@@ -378,7 +425,12 @@ mod test {
         let _ = fs::remove_file(path);
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Layer size mismatch"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Layer size mismatch")
+        );
     }
 
     #[test]
@@ -390,11 +442,21 @@ mod test {
         let tensors = vec![
             (
                 "layer_0_weights".to_string(),
-                TensorView::new(Dtype::F32, layer0_w.shape().to_vec(), bytemuck::cast_slice(layer0_w.as_slice().unwrap())).unwrap(),
+                TensorView::new(
+                    Dtype::F32,
+                    layer0_w.shape().to_vec(),
+                    bytemuck::cast_slice(layer0_w.as_slice().unwrap()),
+                )
+                .unwrap(),
             ),
             (
                 "layer_0_biases".to_string(),
-                TensorView::new(Dtype::F32, layer0_b.shape().to_vec(), bytemuck::cast_slice(layer0_b.as_slice().unwrap())).unwrap(),
+                TensorView::new(
+                    Dtype::F32,
+                    layer0_b.shape().to_vec(),
+                    bytemuck::cast_slice(layer0_b.as_slice().unwrap()),
+                )
+                .unwrap(),
             ),
         ];
 
@@ -406,7 +468,12 @@ mod test {
         let _ = fs::remove_file(path);
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Mismatched dimensions between weights and biases"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Mismatched dimensions between weights and biases")
+        );
     }
 
     #[test]
@@ -421,6 +488,11 @@ mod test {
         let _ = fs::remove_file(path);
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("No layers found in file"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("No layers found in file")
+        );
     }
 }
