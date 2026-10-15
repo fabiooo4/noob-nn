@@ -9,7 +9,7 @@ use std::{collections::HashMap, fs, path::Path};
 #[derive(Debug, Clone)]
 pub struct NeuralNetwork {
     layers: Vec<Layer>,
-    options: NeuralNetworkOptions,
+    pub options: NeuralNetworkOptions,
 }
 
 #[derive(Debug, Clone)]
