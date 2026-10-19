@@ -132,7 +132,7 @@ impl NeuralNetwork {
         let labels = self.options.labels.clone()?;
         let idx = labels.iter().position(|l| l == label)?;
 
-        let mut out = Vec::with_capacity(labels.len());
+        let mut out = vec![0.0; labels.len()];
         let out_val = out.get_mut(idx)?;
         *out_val = value;
 
@@ -511,5 +511,23 @@ mod test {
                 .to_string()
                 .contains("No layers found in file")
         );
+    }
+
+    #[test]
+    fn test_labels_to_output() {
+        let options = NeuralNetworkOptions {
+            learning_rate: 0.3,
+            labels: Some(vec!["cat".to_string(), "dog".to_string()]),
+        };
+        let nn = NeuralNetwork::new(2, &[3], 2, options);
+
+        let output = nn.label_to_output("cat", 1.0);
+        assert_eq!(output, Some(vec![1.0, 0.0]));
+
+        let output = nn.label_to_output("dog", 1.0);
+        assert_eq!(output, Some(vec![0.0, 1.0]));
+
+        let output = nn.label_to_output("bird", 1.0);
+        assert_eq!(output, None);
     }
 }
