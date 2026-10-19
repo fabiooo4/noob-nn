@@ -122,6 +122,22 @@ impl NeuralNetwork {
         output.into_raw_vec_and_offset().0
     }
 
+    /// Converts a label to an expected output vector with a given value in the position of the
+    /// label.
+    ///
+    /// # Returns
+    /// Returns `None` if the model has no labels or if the given label is not contained in the
+    /// model's labels
+    pub fn label_to_output(&self, label: &str, value: f32) -> Option<Vec<f32>> {
+        let labels = self.options.labels.clone()?;
+        let idx = labels.iter().position(|l| l == label)?;
+
+        let mut out = Vec::with_capacity(labels.len());
+        out[idx] = value;
+
+        Some(out)
+    }
+
     /// Converts the output of the model into a label
     pub fn output_to_label(&self, output: &[f32]) -> Option<String> {
         let max = output.iter().cloned().reduce(f32::max).unwrap_or_default();
