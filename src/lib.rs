@@ -133,7 +133,8 @@ impl NeuralNetwork {
         let idx = labels.iter().position(|l| l == label)?;
 
         let mut out = Vec::with_capacity(labels.len());
-        out[idx] = value;
+        let out_val = out.get_mut(idx)?;
+        *out_val = value;
 
         Some(out)
     }
