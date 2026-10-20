@@ -2,7 +2,7 @@ mod layer;
 
 use crate::layer::Layer;
 
-use ndarray::{Array, Array2, ArrayView2};
+use ndarray::{Array2, ArrayView2};
 use safetensors::{Dtype, SafeTensors, tensor::TensorView};
 use std::{collections::HashMap, fs, path::Path};
 
@@ -109,17 +109,28 @@ impl NeuralNetwork {
         Some(self.layers.get(layer)?.to_vec())
     }
 
-    pub fn feed_forward(&self, input: &[f32]) -> Vec<f32> {
-        let input_array = Array::from_shape_vec((input.len(), 1), input.to_vec())
-            .expect("An array can always be converted to a one dimensional matrix");
-
-        // Feed forward every layer
-        let mut output = input_array;
-        for layer in &self.layers {
-            output = layer.feed_layer(&output.view(), Self::activation)
+    pub fn feed_forward(&self, input: &[f32]) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
+        if input.len() != self.shape()[0] {
+            return Err(format!(
+                "Input length {} does not match the number of input neurons {}",
+                input.len(),
+                self.shape()[0]
+            )
+            .into());
         }
 
-        output.into_raw_vec_and_offset().0
+        let input_array = ArrayView2::from_shape((input.len(), 1), input)?;
+        let Some((first_layer, rest_layers)) = self.layers.split_first() else {
+            return Ok(input.to_vec());
+        };
+
+        // Feed forward every layer
+        let mut output = first_layer.feed_layer(&input_array, Self::activation);
+        for layer in rest_layers {
+            output = layer.feed_layer(&output.view(), Self::activation);
+        }
+
+        Ok(output.into_raw_vec_and_offset().0)
     }
 
     /// Converts a label to an expected output vector with a given value in the position of the
@@ -249,7 +260,7 @@ impl NeuralNetwork {
         for (data, expected) in validation_set {
             let expected = self.label_to_output(expected, 1.)?;
 
-            let guess = self.feed_forward(data);
+            let guess = self.feed_forward(data).ok()?;
             let guessed_class = argmax(&guess);
             let expected_class = argmax(&expected);
 
@@ -274,7 +285,7 @@ impl NeuralNetwork {
         for (data, expected) in validation_set {
             let expected = self.label_to_output(expected, 1.)?;
 
-            let guess = self.feed_forward(data);
+            let guess = self.feed_forward(data).ok()?;
             let guessed_class = argmax(&guess);
             let expected_class = argmax(&expected);
 
@@ -310,7 +321,7 @@ impl NeuralNetwork {
         for (data, expected) in validation_set {
             let expected = self.label_to_output(expected, 1.)?;
 
-            let guess = self.feed_forward(data);
+            let guess = self.feed_forward(data).ok()?;
             let guessed_class = argmax(&guess);
             let expected_class = argmax(&expected);
 

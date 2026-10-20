@@ -67,7 +67,9 @@ fn draw_xor(nn: &NeuralNetwork, size: usize) {
         for x in 0..size {
             // A terminal cell is taller than it is wide so each x is drawn twice to compensate
             for _ in 0..2 {
-                let val = nn.feed_forward(&[x as f32 / size as f32, y as f32 / size as f32])[0];
+                let val = nn
+                    .feed_forward(&[x as f32 / size as f32, y as f32 / size as f32])
+                    .expect("Failed to predict a value")[0];
                 let color_val = (val * 255.0).clamp(0.0, 255.0) as u8;
 
                 write!(out, "\x1b[38;2;{c};{c};{c}m{block}", c = color_val).unwrap();
