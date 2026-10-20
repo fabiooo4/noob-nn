@@ -239,15 +239,17 @@ impl NeuralNetwork {
     /// Precision measures the model's ability to identify instances of a particular class correctly
     /// by dividing the instances correctly classified as belonging to a specific class by all the
     /// instances the model predicted to belong to that class
-    pub fn precision(&self, validation_set: &[(&[f32], &[f32])], label: &str) -> Option<f32> {
+    pub fn precision(&self, validation_set: &[(&[f32], &str)], label: &str) -> Option<f32> {
         let selected_class = argmax(&self.label_to_output(label, 1.)?);
 
         let mut true_positive = 0;
         let mut false_positive = 0;
         for (data, expected) in validation_set {
+            let expected = self.label_to_output(expected, 1.)?;
+
             let guess = self.feed_forward(data);
             let guessed_class = argmax(&guess);
-            let expected_class = argmax(expected);
+            let expected_class = argmax(&expected);
 
             if expected_class == selected_class && guessed_class == expected_class {
                 true_positive += 1;
@@ -266,15 +268,17 @@ impl NeuralNetwork {
     ///
     /// # Returns
     /// Returns `None` if the label cannot be converted to an output vector
-    pub fn recall(&self, validation_set: &[(&[f32], &[f32])], label: &str) -> Option<f32> {
+    pub fn recall(&self, validation_set: &[(&[f32], &str)], label: &str) -> Option<f32> {
         let selected_class = argmax(&self.label_to_output(label, 1.)?);
 
         let mut true_positive = 0;
         let mut false_negative = 0;
         for (data, expected) in validation_set {
+            let expected = self.label_to_output(expected, 1.)?;
+
             let guess = self.feed_forward(data);
             let guessed_class = argmax(&guess);
-            let expected_class = argmax(expected);
+            let expected_class = argmax(&expected);
 
             if expected_class == selected_class && guessed_class == expected_class {
                 true_positive += 1;
@@ -291,7 +295,7 @@ impl NeuralNetwork {
     /// # Returns
     /// Returns `None` if the model has no labels stored or if the stored label cannot be converted
     /// to an output vector
-    pub fn precision_avg(&self, validation_set: &[(&[f32], &[f32])]) -> Option<f32> {
+    pub fn precision_avg(&self, validation_set: &[(&[f32], &str)]) -> Option<f32> {
         let mut precision_sum = 0.;
         for label in &self.options.labels.clone()? {
             precision_sum += self.precision(validation_set, label)?;
@@ -305,7 +309,7 @@ impl NeuralNetwork {
     /// # Returns
     /// Returns `None` if the model has no labels stored or if the stored label cannot be converted
     /// to an output vector
-    pub fn recall_avg(&self, validation_set: &[(&[f32], &[f32])]) -> Option<f32> {
+    pub fn recall_avg(&self, validation_set: &[(&[f32], &str)]) -> Option<f32> {
         let mut recall_sum = 0.;
         for label in &self.options.labels.clone()? {
             recall_sum += self.recall(validation_set, label)?;
