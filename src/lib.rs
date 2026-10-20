@@ -298,12 +298,13 @@ impl NeuralNetwork {
     /// Returns `None` if the model has no labels stored or if the stored label cannot be converted
     /// to an output vector
     pub fn precision_avg(&self, validation_set: &[(&[f32], &str)]) -> Option<f32> {
+        let labels = self.options.labels.clone()?;
         let mut precision_sum = 0.;
-        for label in &self.options.labels.clone()? {
+        for label in &labels {
             precision_sum += self.precision(validation_set, label)?;
         }
 
-        Some(precision_sum)
+        Some(precision_sum / labels.len() as f32)
     }
 
     /// Performs the macro-average of the recall on all labels
@@ -312,12 +313,13 @@ impl NeuralNetwork {
     /// Returns `None` if the model has no labels stored or if the stored label cannot be converted
     /// to an output vector
     pub fn recall_avg(&self, validation_set: &[(&[f32], &str)]) -> Option<f32> {
+        let labels = self.options.labels.clone()?;
         let mut recall_sum = 0.;
-        for label in &self.options.labels.clone()? {
+        for label in &labels {
             recall_sum += self.recall(validation_set, label)?;
         }
 
-        Some(recall_sum)
+        Some(recall_sum / labels.len() as f32)
     }
 
     /// Saves the neural network to a file in safetensors format
