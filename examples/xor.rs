@@ -17,13 +17,15 @@ fn main() {
     let mut data = xor_truthtable();
     data.shuffle(&mut rand::rng());
     for epoch in 0..=EPOCHS {
-        for (idx, (input, expected)) in data.iter().enumerate() {
-            predictor.train(input, &[*expected]);
+        for (input, expected) in data.iter() {
+            predictor
+                .train(input, &[*expected])
+                .expect("Training failed");
 
             draw_xor(&predictor, 20);
             println!(
                 "Training epoch: {epoch}/{EPOCHS} {:.0}%",
-                (idx as f32 / data.len() as f32) * 100.
+                (epoch as f32 / EPOCHS as f32) * 100.
             )
         }
     }

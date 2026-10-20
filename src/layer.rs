@@ -1,4 +1,4 @@
-use ndarray::{Array, Array2};
+use ndarray::{Array, Array2, ArrayView2};
 use rand::RngExt;
 
 #[derive(Debug, Clone)]
@@ -22,7 +22,7 @@ impl Layer {
     /// Calculates the output of a layer given an input
     pub fn feed_layer<T: Fn(&f32) -> f32>(
         &self,
-        input: &Array2<f32>,
+        input: &ArrayView2<f32>,
         activation: T,
     ) -> Array2<f32> {
         let weighted_sum = self.weights.dot(input) + &self.biases;

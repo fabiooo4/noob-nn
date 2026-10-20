@@ -2,7 +2,7 @@ mod layer;
 
 use crate::layer::Layer;
 
-use ndarray::{Array, Array2};
+use ndarray::{Array, Array2, ArrayView2};
 use safetensors::{Dtype, SafeTensors, tensor::TensorView};
 use std::{collections::HashMap, fs, path::Path};
 
@@ -116,7 +116,7 @@ impl NeuralNetwork {
         // Feed forward every layer
         let mut output = input_array;
         for layer in &self.layers {
-            output = layer.feed_layer(&output, Self::activation)
+            output = layer.feed_layer(&output.view(), Self::activation)
         }
 
         output.into_raw_vec_and_offset().0
@@ -160,28 +160,47 @@ impl NeuralNetwork {
     }
 
     /// Trains the neural network on a single input and expected output pair.
-    pub fn train(&mut self, input: &[f32], expected: &[f32]) {
-        let input_array = Array::from_shape_vec((input.len(), 1), input.to_vec())
-            .expect("An array can always be converted to a one dimensional matrix");
-        let expected_array = Array::from_shape_vec((expected.len(), 1), expected.to_vec())
-            .expect("An array can always be converted to a one dimensional matrix");
+    pub fn train(
+        &mut self,
+        input: &[f32],
+        expected: &[f32],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if input.len() != self.shape()[0] {
+            return Err(format!(
+                "Input length {} does not match the number of input neurons {}",
+                input.len(),
+                self.shape()[0]
+            )
+            .into());
+        }
+        if expected.len() != *self.shape().last().ok_or("No layers in the network")? {
+            return Err(format!(
+                "Expected length {} does not match the number of output neurons {}",
+                expected.len(),
+                self.shape().last().copied().unwrap_or(0)
+            )
+            .into());
+        }
+
+        let input_array = ArrayView2::from_shape((input.len(), 1), input)?;
+        let expected_array = ArrayView2::from_shape((expected.len(), 1), expected)?;
 
         let mut outputs = Vec::with_capacity(self.layers.len() + 1);
-        outputs.push(input_array);
+        outputs.push(input_array.to_owned());
 
         // Feed forward and save each layer output
         for layer in &self.layers {
             let prev_out = outputs
                 .last()
-                .expect("There is always at least a layer with an output");
-            outputs.push(layer.feed_layer(prev_out, Self::activation));
+                .ok_or("There is always at least a layer with an output")?;
+            outputs.push(layer.feed_layer(&prev_out.view(), Self::activation));
         }
 
         let mut errors = Vec::with_capacity(self.layers.len() + 1);
 
         // Calculate the network output error to propagate backwards
         errors.push(
-            expected_array
+            &expected_array
                 - outputs
                     .last()
                     .expect("There is always at least a layer with an output"),
@@ -199,6 +218,9 @@ impl NeuralNetwork {
             // Gradient descent
             // δe/δo * δo/δi
             // Multiply the derivative of the error with the derivative of the output
+            // TODO: this works only for the sigmoid activation function, when using other
+            // functions the derivative should be calculated by taking as input the non activated
+            // output of the layer
             let gradient = prev_err * layer_output.map(Self::activation_derivative);
 
             // Calculate the error for the previous layer
@@ -215,6 +237,8 @@ impl NeuralNetwork {
             // The derivative of the bias over the weights is 1 so just multiply by the gradient
             layer.biases += &(self.options.learning_rate * &gradient);
         }
+
+        Ok(())
     }
 
     /// Validates the model accuracy on a validation set given as an array of (data, expected)
