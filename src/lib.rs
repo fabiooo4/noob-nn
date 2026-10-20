@@ -1,6 +1,7 @@
+mod evaluation;
 mod layer;
 
-use crate::layer::Layer;
+use crate::{evaluation::ConfusionMatrix, layer::Layer};
 
 use ndarray::{Array2, ArrayView2};
 use safetensors::{Dtype, SafeTensors, tensor::TensorView};
@@ -252,124 +253,36 @@ impl NeuralNetwork {
         Ok(())
     }
 
-    /// Validates the model accuracy on a validation set given as an array of (data, expected)
-    ///
-    /// Provides an estimate of the overall model quality, but it disregards class balance and the cost of different errors.
-    pub fn accuracy(&self, validation_set: &[(&[f32], &str)]) -> Option<f32> {
-        let mut correct = 0;
-        for (data, expected) in validation_set {
-            let expected = self.label_to_output(expected, 1.)?;
-
-            let guess = self.feed_forward(data).ok()?;
-            let guessed_class = argmax(&guess);
-            let expected_class = argmax(&expected);
-
-            if guessed_class == expected_class {
-                correct += 1;
-            }
-        }
-
-        Some(correct as f32 / validation_set.len() as f32)
-    }
-
-    /// Validates the model precision on a validation set given as an array of (data, expected)
-    ///
-    /// Precision measures the model's ability to identify instances of a particular class correctly
-    /// by dividing the instances correctly classified as belonging to a specific class by all the
-    /// instances the model predicted to belong to that class
-    pub fn precision(&self, validation_set: &[(&[f32], &str)], label: &str) -> Option<f32> {
-        let selected_class = argmax(&self.label_to_output(label, 1.)?);
-
-        let mut true_positive = 0;
-        let mut false_positive = 0;
-        for (data, expected) in validation_set {
-            let expected = self.label_to_output(expected, 1.)?;
-
-            let guess = self.feed_forward(data).ok()?;
-            let guessed_class = argmax(&guess);
-            let expected_class = argmax(&expected);
-
-            if guessed_class == selected_class {
-                if guessed_class == expected_class {
-                    true_positive += 1;
-                } else {
-                    false_positive += 1;
-                }
-            }
-        }
-
-        let total_predicted_positive = true_positive + false_positive;
-        if total_predicted_positive == 0 {
-            return Some(0.0);
-        }
-
-        Some(true_positive as f32 / total_predicted_positive as f32)
-    }
-
-    /// Validates the model recall on a validation set given as an array of (data, expected)
-    ///
-    /// Recall measures the model's ability to identify all instances of a particular class by
-    /// dividing the instances in a class that the model correctly classified by all instances in that class
-    ///
-    /// # Returns
-    /// Returns `None` if the label cannot be converted to an output vector
-    pub fn recall(&self, validation_set: &[(&[f32], &str)], label: &str) -> Option<f32> {
-        let selected_class = argmax(&self.label_to_output(label, 1.)?);
-
-        let mut true_positive = 0;
-        let mut false_negative = 0;
-        for (data, expected) in validation_set {
-            let expected = self.label_to_output(expected, 1.)?;
-
-            let guess = self.feed_forward(data).ok()?;
-            let guessed_class = argmax(&guess);
-            let expected_class = argmax(&expected);
-
-            if expected_class == selected_class {
-                if guessed_class == selected_class {
-                    true_positive += 1;
-                } else {
-                    false_negative += 1;
-                }
-            }
-        }
-
-        let total_actual_positive = true_positive + false_negative;
-        if total_actual_positive == 0 {
-            return Some(0.0);
-        }
-
-        Some(true_positive as f32 / total_actual_positive as f32)
-    }
-
-    /// Performs the macro-average of the precision on all labels
-    ///
-    /// # Returns
-    /// Returns `None` if the model has no labels stored or if the stored label cannot be converted
-    /// to an output vector
-    pub fn precision_avg(&self, validation_set: &[(&[f32], &str)]) -> Option<f32> {
+    // Constructs a confusion matrix for the model given a validation set
+    pub fn validate(&self, validation_set: &[(&[f32], &str)]) -> Option<ConfusionMatrix> {
         let labels = self.options.labels.clone()?;
-        let mut precision_sum = 0.;
-        for label in &labels {
-            precision_sum += self.precision(validation_set, label)?;
+        if labels.is_empty() {
+            return None;
         }
 
-        Some(precision_sum / labels.len() as f32)
-    }
+        let label_to_idx: HashMap<&str, usize> = labels
+            .iter()
+            .enumerate()
+            .map(|(idx, label)| (label.as_str(), idx))
+            .collect();
 
-    /// Performs the macro-average of the recall on all labels
-    ///
-    /// # Returns
-    /// Returns `None` if the model has no labels stored or if the stored label cannot be converted
-    /// to an output vector
-    pub fn recall_avg(&self, validation_set: &[(&[f32], &str)]) -> Option<f32> {
-        let labels = self.options.labels.clone()?;
-        let mut recall_sum = 0.;
-        for label in &labels {
-            recall_sum += self.recall(validation_set, label)?;
+        let num_classes = labels.len();
+        let mut matrix: Array2<usize> = Array2::zeros((num_classes, num_classes));
+
+        for (data, expected_label) in validation_set {
+            let expected_class = *label_to_idx.get(expected_label)?;
+
+            let guess = self.feed_forward(data).ok()?;
+            let guessed_class = argmax(&guess)?;
+
+            if guessed_class >= num_classes {
+                return None;
+            }
+
+            matrix[[expected_class, guessed_class]] += 1;
         }
 
-        Some(recall_sum / labels.len() as f32)
+        Some(ConfusionMatrix { matrix, labels })
     }
 
     /// Saves the neural network to a file in safetensors format
