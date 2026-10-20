@@ -219,12 +219,14 @@ impl NeuralNetwork {
     /// Validates the model accuracy on a validation set given as an array of (data, expected)
     ///
     /// Provides an estimate of the overall model quality, but it disregards class balance and the cost of different errors.
-    pub fn accuracy(&self, validation_set: &[(&[f32], &[f32])]) -> Option<f32> {
+    pub fn accuracy(&self, validation_set: &[(&[f32], &str)]) -> Option<f32> {
         let mut correct = 0;
         for (data, expected) in validation_set {
+            let expected = self.label_to_output(expected, 1.)?;
+
             let guess = self.feed_forward(data);
             let guessed_class = argmax(&guess);
-            let expected_class = argmax(expected);
+            let expected_class = argmax(&expected);
 
             if guessed_class == expected_class {
                 correct += 1;
