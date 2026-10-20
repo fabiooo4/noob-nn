@@ -216,6 +216,104 @@ impl NeuralNetwork {
         }
     }
 
+    /// Validates the model accuracy on a validation set given as an array of (data, expected)
+    ///
+    /// Provides an estimate of the overall model quality, but it disregards class balance and the cost of different errors.
+    pub fn accuracy(&self, validation_set: &[(&[f32], &[f32])]) -> Option<f32> {
+        let mut correct = 0;
+        for (data, expected) in validation_set {
+            let guess = self.feed_forward(data);
+            let guessed_class = argmax(&guess);
+            let expected_class = argmax(expected);
+
+            if guessed_class == expected_class {
+                correct += 1;
+            }
+        }
+
+        Some(correct as f32 / validation_set.len() as f32)
+    }
+
+    /// Validates the model precision on a validation set given as an array of (data, expected)
+    ///
+    /// Precision measures the model's ability to identify instances of a particular class correctly
+    /// by dividing the instances correctly classified as belonging to a specific class by all the
+    /// instances the model predicted to belong to that class
+    pub fn precision(&self, validation_set: &[(&[f32], &[f32])], label: &str) -> Option<f32> {
+        let selected_class = argmax(&self.label_to_output(label, 1.)?);
+
+        let mut true_positive = 0;
+        let mut false_positive = 0;
+        for (data, expected) in validation_set {
+            let guess = self.feed_forward(data);
+            let guessed_class = argmax(&guess);
+            let expected_class = argmax(expected);
+
+            if expected_class == selected_class && guessed_class == expected_class {
+                true_positive += 1;
+            } else if guessed_class == selected_class && guessed_class != expected_class {
+                false_positive += 1;
+            }
+        }
+
+        Some(true_positive as f32 / (true_positive as f32 / false_positive as f32))
+    }
+
+    /// Validates the model recall on a validation set given as an array of (data, expected)
+    ///
+    /// Recall measures the model's ability to identify all instances of a particular class by
+    /// dividing the instances in a class that the model correctly classified by all instances in that class
+    ///
+    /// # Returns
+    /// Returns `None` if the label cannot be converted to an output vector
+    pub fn recall(&self, validation_set: &[(&[f32], &[f32])], label: &str) -> Option<f32> {
+        let selected_class = argmax(&self.label_to_output(label, 1.)?);
+
+        let mut true_positive = 0;
+        let mut false_negative = 0;
+        for (data, expected) in validation_set {
+            let guess = self.feed_forward(data);
+            let guessed_class = argmax(&guess);
+            let expected_class = argmax(expected);
+
+            if expected_class == selected_class && guessed_class == expected_class {
+                true_positive += 1;
+            } else if guessed_class == selected_class {
+                false_negative += 1;
+            }
+        }
+
+        Some(true_positive as f32 / (true_positive as f32 / false_negative as f32))
+    }
+
+    /// Performs the macro-average of the precision on all labels
+    ///
+    /// # Returns
+    /// Returns `None` if the model has no labels stored or if the stored label cannot be converted
+    /// to an output vector
+    pub fn precision_avg(&self, validation_set: &[(&[f32], &[f32])]) -> Option<f32> {
+        let mut precision_sum = 0.;
+        for label in &self.options.labels.clone()? {
+            precision_sum += self.precision(validation_set, label)?;
+        }
+
+        Some(precision_sum)
+    }
+
+    /// Performs the macro-average of the recall on all labels
+    ///
+    /// # Returns
+    /// Returns `None` if the model has no labels stored or if the stored label cannot be converted
+    /// to an output vector
+    pub fn recall_avg(&self, validation_set: &[(&[f32], &[f32])]) -> Option<f32> {
+        let mut recall_sum = 0.;
+        for label in &self.options.labels.clone()? {
+            recall_sum += self.recall(validation_set, label)?;
+        }
+
+        Some(recall_sum)
+    }
+
     /// Saves the neural network to a file in safetensors format
     pub fn save_to_file(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
         let mut tensors = Vec::with_capacity(self.layers.len() * 2); // Each layer has also a bias
@@ -325,6 +423,12 @@ impl NeuralNetwork {
         let array = Array2::from_shape_vec((shape[0], shape[1]), data_f32.to_vec())?;
         Ok(array)
     }
+}
+
+/// Returns the index of the maximum value
+fn argmax(input: &[f32]) -> Option<usize> {
+    let max = input.iter().cloned().reduce(f32::max)?;
+    input.iter().position(|&i| i == max)
 }
 
 #[cfg(test)]
