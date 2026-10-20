@@ -159,6 +159,7 @@ impl NeuralNetwork {
         activated_input * (1. - activated_input)
     }
 
+    /// Trains the neural network on a single input and expected output pair.
     pub fn train(&mut self, input: &[f32], expected: &[f32]) {
         let input_array = Array::from_shape_vec((input.len(), 1), input.to_vec())
             .expect("An array can always be converted to a one dimensional matrix");
@@ -203,7 +204,7 @@ impl NeuralNetwork {
             // Calculate the error for the previous layer
             // δe/δo
             // How much the error is sensitive to changes in output
-            let err = layer.weights.t().dot(prev_err);
+            let err = layer.weights.t().dot(&gradient);
             errors.push(err);
 
             // Update weights
@@ -253,14 +254,21 @@ impl NeuralNetwork {
             let guessed_class = argmax(&guess);
             let expected_class = argmax(&expected);
 
-            if expected_class == selected_class && guessed_class == expected_class {
-                true_positive += 1;
-            } else if guessed_class == selected_class && guessed_class != expected_class {
-                false_positive += 1;
+            if guessed_class == selected_class {
+                if guessed_class == expected_class {
+                    true_positive += 1;
+                } else {
+                    false_positive += 1;
+                }
             }
         }
 
-        Some(true_positive as f32 / (true_positive as f32 / false_positive as f32))
+        let total_predicted_positive = true_positive + false_positive;
+        if total_predicted_positive == 0 {
+            return Some(0.0);
+        }
+
+        Some(true_positive as f32 / total_predicted_positive as f32)
     }
 
     /// Validates the model recall on a validation set given as an array of (data, expected)
@@ -282,14 +290,21 @@ impl NeuralNetwork {
             let guessed_class = argmax(&guess);
             let expected_class = argmax(&expected);
 
-            if expected_class == selected_class && guessed_class == expected_class {
-                true_positive += 1;
-            } else if guessed_class == selected_class {
-                false_negative += 1;
+            if expected_class == selected_class {
+                if guessed_class == selected_class {
+                    true_positive += 1;
+                } else {
+                    false_negative += 1;
+                }
             }
         }
 
-        Some(true_positive as f32 / (true_positive as f32 / false_negative as f32))
+        let total_actual_positive = true_positive + false_negative;
+        if total_actual_positive == 0 {
+            return Some(0.0);
+        }
+
+        Some(true_positive as f32 / total_actual_positive as f32)
     }
 
     /// Performs the macro-average of the precision on all labels
